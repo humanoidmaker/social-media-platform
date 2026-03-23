@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: socialmedia
+      POSTGRES_USER: socialmedia
+      POSTGRES_PASSWORD: socialmedia
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U socialmedia"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  minio-test:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: test_minio
+      MINIO_ROOT_PASSWORD: test_minio_secret
+    ports:
+      - "9002:9000"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: pytest -v --cov=app --cov-report=term-missing
+    environment:
+      DATABASE_URL: postgresql+asyncpg://socialmedia:socialmedia@postgres-test:5432/social_media_test
+      REDIS_URL: redis://redis-test:6379/0
+      MINIO_ENDPOINT: minio-test:9000
+      MINIO_ACCESS_KEY: test_minio
+      MINIO_SECRET_KEY: test_minio_secret
+      MINIO_BUCKET: social_media-test-media
+      SECRET_KEY: test-secret-key
+      TESTING: "true"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      minio-test:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
